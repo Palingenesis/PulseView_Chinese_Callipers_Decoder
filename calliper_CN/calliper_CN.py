@@ -3,7 +3,7 @@
 #
 # Author: Tim Jackson.1960
 # Date: 2024-09-04
-# License: GPLv2+
+# License: MIT Just give credit where due
 #
 
 import sigrokdecode as srd
@@ -41,8 +41,6 @@ class Decoder(srd.Decoder):
         ("convertedValues", "Converted Values", (7,)),
     )
             
-    frame_index = 0
-    frame_separator_detected = False
 
     def __init__(self):
         self.reset()
@@ -53,6 +51,9 @@ class Decoder(srd.Decoder):
         self.last_sample = None
         self.null_detected = True
         self.ranges = {}
+        self.frame_index = 0
+        self.frame_header_detected = False
+        self.frame_separator_detected = False
 
     def metadata(self, key, value):
         if key == srd.SRD_CONF_SAMPLERATE:
@@ -99,7 +100,6 @@ class Decoder(srd.Decoder):
         while True:
 
             clk, data = self.wait([{0: "e"}, {0: "r"}])  # Wait for edge on clock
-
             clk_sample = self.samplenum
             clk_level = self.matched[1]
 
@@ -114,46 +114,28 @@ class Decoder(srd.Decoder):
                 # ===   Rising edge ===========
 
                 if clk_level == 1:  
-                    if (
-                        self.ranges["Header_Footer"][0]
-                        <= duration
-                        <= self.ranges["Header_Footer"][1]
-                    ):
+                    if (self.ranges["Header_Footer"][0] <= duration <= self.ranges["Header_Footer"][1]):
+                        
                         label = "Header" if self.null_detected else "Footer"
-                        self.put(
-                            self.last_sample, clk_sample, self.out_ann, [3, [label]]
-                        )
+                        self.put(self.last_sample, clk_sample, self.out_ann, [3, [label]])
+
+                        if label == "Header":
+                            self.frame_header_detected = True
 
                         if label == "Footer":
                            collecting = False
                            self.frame_index = 0
 
                         self.null_detected = False
-                    elif (
-                        self.ranges["Frame_Seperator"][0]
-                        <= duration
-                        <= self.ranges["Frame_Seperator"][1]
-                    ):
-                        self.put(
-                            self.last_sample,
-                            clk_sample,
-                            self.out_ann,
-                            [3, ["Frame Seperator"]],
-                        )
+
+                    elif (self.ranges["Frame_Seperator"][0] <= duration <= self.ranges["Frame_Seperator"][1]):
+                        self.put(self.last_sample, clk_sample, self.out_ann, [3, ["Frame Seperator"]],)
                         self.frame_separator_detected = True
                         collecting = False
 
-                    elif (
-                        self.ranges["BitSpacer"][0]
-                        <= duration
-                        <= self.ranges["BitSpacer"][1]
-                    ):
-                        self.put(
-                            self.last_sample,
-                            clk_sample,
-                            self.out_ann,
-                            [1, ["Bit Spacer"]],
-                        )
+                    elif (self.ranges["BitSpacer"][0] <= duration <= self.ranges["BitSpacer"][1]):
+                        self.put(self.last_sample, clk_sample, self.out_ann, [1, ["Bit Spacer"]],)
+
                     else:
                         # Unexpected duration — maybe log or skip
                         pass 
@@ -162,22 +144,19 @@ class Decoder(srd.Decoder):
 
                 elif clk_level == 0:
                     if (self.ranges["Bit_Pulse"][0] <= duration <= self.ranges["Bit_Pulse"][1]):
-
                         self.put(self.last_sample, clk_sample, self.out_ann, [0, ["Bit Pulse"]],)
                         self.put(self.last_sample, clk_sample, self.out_ann, [4, [str(data_level)]],)
 
-                        if not collecting and (self.null_detected or self.frame_separator_detected):
+                        if not collecting and (self.frame_header_detected or self.frame_separator_detected):
                             collecting = True
                             bit_buffer = []
                             bit_start_sample = self.last_sample
-
 
                         # Inside your decoding loop:
                         if collecting:
                             bit_buffer.append(str(data_level))
                             if len(bit_buffer) == 24:
                                 bit_end_sample = clk_sample
-                                # binary_str = "".join(bit_buffer)
                                 binary_str = "".join(reversed(bit_buffer))
                                 value = int(binary_str, 2)
                                 if binary_str[0] == "1":
@@ -193,6 +172,8 @@ class Decoder(srd.Decoder):
                                     mm_value = (value * 2) / conversion_units["metric"]
                                     converted_label = "6mm Calibration offset = {:.2f} mm".format(mm_value)
                                     self.put(bit_start_sample, bit_end_sample, self.out_ann, [7, [converted_label]])
+                                    self.frame_header_detected = False # reset after use
+
                                 else:
                                     mm_value = (value * 2) / conversion_units["metric"]
                                     inch_value = (value * 2) / conversion_units["imperial"]
@@ -204,21 +185,14 @@ class Decoder(srd.Decoder):
                                 collecting = False
 
 
-                    elif (
-                        self.ranges["Null_State"][0]
-                        <= duration
-                        <= self.ranges["Null_State"][1]
-                    ):
-                        self.put(
-                            self.last_sample,
-                            clk_sample,
-                            self.out_ann,
-                            [5, ["Null State"]],
-                        )
+                    elif (self.ranges["Null_State"][0] <= duration <= self.ranges["Null_State"][1]):
+                        self.put(self.last_sample, clk_sample, self.out_ann, [5, ["Null State"]],)
                         self.null_detected = True
+
                     else:
                         # Unexpected duration — maybe log or skip
                         pass
+
                 else:
                     # Unexpected level — maybe log or skip
                     pass
