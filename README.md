@@ -5,6 +5,11 @@
 This project provides a timing-based protocol decoder for Chinese digital calipers, designed for use with [PulseView](https://sigrok.org/wiki/PulseView) and the Sigrok decoding framework. It classifies pulse types, extracts raw binary values, and converts caliper units into metric and imperial formats — all with accessibility and clarity in mind.
 
 ---
+## 🎥 Demo Video
+
+[Tim's Digital Calliper Interface [Protocol CN]](https://youtu.be/M7SdDR3ZtSE)
+
+---
 
 ## 📦 Features
 
